@@ -16,6 +16,10 @@ class PostgresTaskRepositorySuite extends FunSuite:
       .use(xa => use(new PostgresTaskRepository(xa)))
       .unsafeRunSync()
 
+  override def beforeAll(): Unit =
+    if sys.env.get("TASKFLOW_INTEGRATION").contains("1") then
+      Database.migrate(Database.Config.fromEnv).unsafeRunSync()
+
   if sys.env.get("TASKFLOW_INTEGRATION").contains("1") then
 
     test("tasks survive creating a new repository object"):

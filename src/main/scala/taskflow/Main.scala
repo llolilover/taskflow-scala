@@ -22,7 +22,9 @@ object Main extends IOApp.Simple:
   }
 
   def run: IO[Unit] =
-    Database.transactor(Database.Config.fromEnv).use { xa =>
+    val config = Database.Config.fromEnv
+    Database.migrate(config).flatMap { _ =>
+      Database.transactor(config).use { xa =>
       val service = new PostgresTaskRepository(xa)
       val app = (healthRoutes <+> TaskRoutes.routes(service)).orNotFound
 
@@ -30,10 +32,11 @@ object Main extends IOApp.Simple:
       sql"SELECT 1".query[Int].unique.transact(xa).flatMap { _ =>
         EmberServerBuilder
           .default[IO]
-          .withHost(ipv4"127.0.0.1")
+          .withHost(ipv4"0.0.0.0")
           .withPort(port"8080")
           .withHttpApp(app)
           .build
           .use(_ => IO.never)
+      }
       }
     }

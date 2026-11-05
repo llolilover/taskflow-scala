@@ -3,6 +3,7 @@ package taskflow.persistence
 import cats.effect.{IO, Resource}
 import com.zaxxer.hikari.HikariConfig
 import doobie.hikari.HikariTransactor
+import org.flywaydb.core.Flyway
 
 /** Environment-based configuration for the local PostgreSQL database. */
 object Database:
@@ -15,6 +16,24 @@ object Database:
         sys.env.getOrElse("DB_USER", "taskflow"),
         sys.env.getOrElse("DB_PASSWORD", "taskflow")
       )
+
+  /**
+   * Apply versioned migrations on startup before serving requests.
+   * For an existing local database initialized by db/init/001_schema.sql,
+   * opt into one-time baselining with FLYWAY_BASELINE_ON_MIGRATE=true.
+   */
+  def migrate(config: Config): IO[Unit] =
+    IO.blocking {
+      val baselineExisting =
+        sys.env.get("FLYWAY_BASELINE_ON_MIGRATE").contains("true")
+      val flyway = Flyway.configure()
+        .dataSource(config.url, config.user, config.password)
+        .locations("classpath:db/migration")
+        .baselineOnMigrate(baselineExisting)
+        .load()
+      flyway.migrate()
+      ()
+    }
 
   def transactor(config: Config): Resource[IO, HikariTransactor[IO]] =
     Resource.eval(IO {

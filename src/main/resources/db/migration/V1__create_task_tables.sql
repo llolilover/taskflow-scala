@@ -1,4 +1,4 @@
--- Initial schema. Mounted into the PostgreSQL Docker image on first database initialization.
+-- V1: initialize task tables. Existing development databases use a one-time baseline.
 CREATE TABLE IF NOT EXISTS tasks (
   id UUID PRIMARY KEY,
   title VARCHAR(120) NOT NULL CHECK (length(btrim(title)) > 0),
@@ -16,6 +16,3 @@ CREATE TABLE IF NOT EXISTS task_history (
   to_status VARCHAR(20) NOT NULL CHECK (to_status IN ('Backlog', 'InProgress', 'Done', 'Cancelled')),
   occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
-CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at, id);
-CREATE INDEX IF NOT EXISTS idx_history_task ON task_history(task_id, occurred_at, id);

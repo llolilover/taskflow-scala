@@ -15,6 +15,8 @@ lazy val root = (project in file("."))
       "org.tpolecat" %% "doobie-core" % "1.0.0-RC12",
       "org.tpolecat" %% "doobie-postgres" % "1.0.0-RC12",
       "org.tpolecat" %% "doobie-hikari" % "1.0.0-RC12",
+      "org.flywaydb" % "flyway-core" % "11.20.3",
+      "org.flywaydb" % "flyway-database-postgresql" % "11.20.3",
       "org.scalameta" %% "munit" % "1.2.1" % Test
     )
   )
