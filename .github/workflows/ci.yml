@@ -17,5 +17,22 @@ jobs:
           cache: sbt
       - name: Set up sbt
         uses: sbt/setup-sbt@v1
-      - name: Compile and test
+      - name: Start PostgreSQL
+        run: docker compose up -d db
+      - name: Wait until PostgreSQL is ready
+        run: |
+          for i in {1..40}; do
+            if docker compose exec -T db pg_isready -U taskflow -d taskflow; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs db
+          exit 1
+      - name: Compile and run unit/integration tests
+        env:
+          TASKFLOW_INTEGRATION: '1'
         run: sbt -batch clean test
+      - name: Stop PostgreSQL
+        if: always()
+        run: docker compose down -v

@@ -20,4 +20,6 @@ stale_status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$base/tasks/$id/
   -H 'Content-Type: application/json' -d '{"status":"Cancelled","expectedVersion":0}')
 [[ "$stale_status" == "409" ]] || { echo "expected 409, got $stale_status" >&2; exit 1; }
 
-echo "Smoke checks passed: health, create, get, list, update, version conflict."
+history=$(curl -fsS "$base/tasks/$id/history")
+printf '%s' "$history" | python3 -c 'import json,sys; rows=json.load(sys.stdin); assert len(rows)==1 and rows[0]["fromStatus"]=="Backlog" and rows[0]["toStatus"]=="InProgress"'
+echo "Smoke checks passed: health, create, get, list, update, version conflict, history."

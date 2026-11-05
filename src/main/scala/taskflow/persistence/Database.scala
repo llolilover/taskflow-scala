@@ -27,4 +27,4 @@ object Database:
       hikari.setMinimumIdle(1)
       hikari.setPoolName("taskflow-db")
       hikari
-    }).flatMap(HikariTransactor.fromHikariConfig[IO])
+    }).flatMap(config => HikariTransactor.fromHikariConfig[IO](config))
