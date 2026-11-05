@@ -11,9 +11,9 @@
 - Аудит: изменение задачи и запись истории в одной SQL-транзакции
 - Фильтры по статусу и исполнителю; keyset-пагинация по UUID с лимитом 1–100
 - Flyway: версия схемы БД, V1 (таблицы) и V2 (индексы)
-- MUnit: unit + PostgreSQL-интеграционные тесты
+- MUnit: доменные, HTTP-маршрутные и PostgreSQL-интеграционные тесты
 - Docker Compose: приложение и база запускаются вместе
-- GitHub Actions: компиляция, тесты, сборка JAR, Docker и HTTP smoke-тесты
+- GitHub Actions: компиляция, тесты, сборка JAR, Docker, HTTP smoke-тесты и проверка сохранности после перезапуска
 
 ## Быстрый запуск через Docker
 
@@ -77,6 +77,9 @@ java -jar target/scala-3.3.9/taskflow.jar
 
 ## Архитектура
 
+Разбор границ слоёв, SQL-транзакций, optimistic locking и компромиссов — в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). План ручной проверки и вопросы для защиты — в [docs/TESTING.md](docs/TESTING.md).
+
+
 `TaskRoutes` → `TaskOperations` → `PostgresTaskRepository` → PostgreSQL
 
 Доменная модель применяет правила переходов без взаимодействия с БД. Конкурентная защита работает атомарным SQL `UPDATE` с проверкой версии. В той же транзакции создаётся запись истории. `TaskService` на `Ref` используется только в быстрых unit-тестах.
@@ -86,6 +89,10 @@ java -jar target/scala-3.3.9/taskflow.jar
 ## API
 
 См. [docs/API.md](docs/API.md). Основные маршруты: `POST /tasks`, `GET /tasks?limit=20&status=Backlog`, `GET /tasks/{id}`, `PATCH /tasks/{id}/status`, `GET /tasks/{id}/history`.
+
+## Безопасность локального запуска
+
+В Docker приложение слушает все интерфейсы **внутри контейнера** через `TASKFLOW_BIND_ALL=true`, но порт опубликован только на `127.0.0.1` хоста. При `sbt run` сервер по умолчанию привязан к `127.0.0.1`. В демонстрационном Docker Compose находятся учебные учётные данные; для внешнего развёртывания они не подходят.
 
 ## Ограничения
 
