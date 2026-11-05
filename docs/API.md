@@ -1,30 +1,48 @@
-# TaskFlow API
+# TaskFlow HTTP API
 
-Базовый адрес: `http://127.0.0.1:8080`.
+Base URL: `http://localhost:8080`
 
-| Метод | URL | Ответ |
+| Метод | Endpoint | Результат |
 | --- | --- | --- |
-| GET | `/health` | 200, строка состояния |
-| POST | `/tasks` | 201, созданная задача |
-| GET | `/tasks` | 200, страница с фильтрами и курсором |
-| GET | `/tasks/{uuid}` | 200, конкретная задача |
-| PATCH | `/tasks/{uuid}/status` | 200, задача с новой версией |
-| GET | `/tasks/{uuid}/history` | 200, история переходов |
+| `GET` | `/health` | `200`, текст состояния |
+| `POST` | `/tasks` | `201`, созданная задача |
+| `GET` | `/tasks` | `200`, страница задач |
+| `GET` | `/tasks/{id}` | `200`, задача |
+| `PATCH` | `/tasks/{id}/status` | `200`, обновлённая задача |
+| `GET` | `/tasks/{id}/history` | `200`, история переходов |
 
-### Получение страницы задач
+## Создание задачи
 
-`GET /tasks?status=Backlog&assignee=<UUID>&limit=20&cursor=<UUID>`
+`POST /tasks`
 
-Все параметры необязательные. `status` — одно из `Backlog`, `InProgress`, `Done`, `Cancelled`; регистр неважен. `assignee` — UUID исполнителя; `limit` от 1 до 100 (по умолчанию 20). `cursor` — последний UUID из предыдущей страницы, который сервер вернул как `nextCursor`.
+```json
+{
+  "title": "Implement API",
+  "assigneeId": null
+}
+```
 
-Результат всегда объект:
+`assigneeId` — необязательный UUID исполнителя. Название не может быть пустым, максимальная длина — 120 символов.
+
+Ответ содержит `id`, `title`, `status` (`Backlog`), `version` (`0`) и `assigneeId`.
+
+## Список задач
+
+`GET /tasks?status=Backlog&limit=20`
+
+| Параметр | Значение |
+| --- | --- |
+| `status` | `Backlog`, `InProgress`, `Done`, `Cancelled` |
+| `assignee` | UUID исполнителя |
+| `limit` | 1–100, по умолчанию 20 |
+| `cursor` | UUID из `nextCursor` предыдущей страницы |
 
 ```json
 {
   "items": [
     {
       "id": "550e8400-e29b-41d4-a716-446655440000",
-      "title": "Read Scala docs",
+      "title": "Implement API",
       "status": "Backlog",
       "version": 0,
       "assigneeId": null
@@ -34,48 +52,29 @@
 }
 ```
 
-Когда `nextCursor` не `null`, передайте его как `cursor` для следующего запроса. Сортировка **по UUID задачи, а не по времени создания**: это намеренно выбранный стабильный keyset-порядок, использующий первичный индекс `tasks.id`. Используем `LIMIT + 1`, чтобы определить наличие следующей страницы, без `COUNT(*)`. При параллельных изменениях статуса состав страниц с фильтром может меняться.
+`nextCursor = null` означает конец списка. Порядок — по UUID задачи.
 
-`POST /tasks` принимает обязательный `title` и необязательный `assigneeId` (UUID):
+## Изменение статуса
 
-```json
-{"title": "Read Scala docs", "assigneeId": "ad2541c4-c101-4d5a-b958-3dd0c5b281c8"}
-```
-
-### Создать задачу:
-
-```bash
-curl -i -X POST http://127.0.0.1:8080/tasks \
-  -H 'Content-Type: application/json' -d '{"title":"Read Scala docs"}'
-```
-
-Успешный ответ `201` содержит автоматически сгенерированный UUID, `status="Backlog"` и `version=0`. Скопируй реальный `id` из ответа.
-
-Изменить статус:
-
-```bash
-curl -i -X PATCH http://127.0.0.1:8080/tasks/UUID/status \
-  -H 'Content-Type: application/json' \
-  -d '{"status":"InProgress","expectedVersion":0}'
-```
-
-При успехе `version` станет `1`. Повтор с прежней версией даст `409 Conflict`.
-
-История задачи:
-
-```bash
-curl -i http://127.0.0.1:8080/tasks/UUID/history
-```
-
-Пример события (идентификаторы и время условные):
+`PATCH /tasks/{id}/status`
 
 ```json
-[{"id":"37c721d5-7787-42ef-85fa-e68b54523249","fromStatus":"Backlog","toStatus":"InProgress","occurredAt":"2026-11-05 19:00:00+00"}]
+{
+  "status": "InProgress",
+  "expectedVersion": 0
+}
 ```
 
-Коды ошибок:
-- `400`: неверный JSON, UUID, статус, название, курсор или limit
-- `404`: задача отсутствует
-- `409`: версия устарела или переход запрещён
+`expectedVersion` — неотрицательная версия задачи, прочитанная клиентом. Успешный переход увеличивает `version` на 1 и создаёт запись в истории.
 
-Важно: новая запись истории появляется только при **успешном** изменении статуса, внутри той же SQL-транзакции, что и обновление задачи. См. [архитектурное объяснение](ARCHITECTURE.md) и [тестовые сценарии](TESTING.md).
+## История
+
+`GET /tasks/{id}/history` возвращает массив событий с полями `id`, `fromStatus`, `toStatus`, `occurredAt`.
+
+## Ошибки
+
+| Код | Причина |
+| --- | --- |
+| `400` | Некорректные параметры или тело запроса |
+| `404` | Задача не найдена |
+| `409` | Конфликт версии или запрещённый переход |
