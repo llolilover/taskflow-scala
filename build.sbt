@@ -9,6 +9,9 @@ lazy val root = (project in file("."))
     assembly / assemblyJarName := "taskflow.jar",
     assembly / test := {},
     assembly / assemblyMergeStrategy := {
+      // Java module descriptors conflict when packaging dependencies into a classpath JAR.
+      case path if path == "module-info.class" || path.endsWith("/module-info.class") =>
+        MergeStrategy.discard
       case PathList("META-INF", "services", _ @ _*) => MergeStrategy.filterDistinctLines
       case path => (assembly / assemblyMergeStrategy).value(path)
     },
