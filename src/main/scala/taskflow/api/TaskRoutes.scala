@@ -137,6 +137,8 @@ object TaskRoutes:
           case Some(uuid) =>
             req.attemptAs[ChangeStatusRequest].value.flatMap {
               case Left(_) => BadRequest(ErrorResponse("Invalid JSON body"))
+              case Right(body) if body.expectedVersion < 0L =>
+                BadRequest(ErrorResponse("expectedVersion must be non-negative"))
               case Right(body) =>
                 TaskStatus.parse(body.status) match
                   case None => BadRequest(ErrorResponse("Unknown task status"))

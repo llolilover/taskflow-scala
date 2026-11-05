@@ -32,7 +32,10 @@ object Main extends IOApp.Simple:
         sql"SELECT 1".query[Int].unique.transact(xa).flatMap { _ =>
           EmberServerBuilder
             .default[IO]
-            .withHost(ipv4"0.0.0.0")
+            .withHost(
+              if sys.env.get("TASKFLOW_BIND_ALL").contains("true") then ipv4"0.0.0.0"
+              else ipv4"127.0.0.1"
+            )
             .withPort(port"8080")
             .withHttpApp(app)
             .build

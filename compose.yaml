@@ -24,6 +24,7 @@ services:
       DB_USER: taskflow
       DB_PASSWORD: taskflow
       FLYWAY_BASELINE_ON_MIGRATE: ${FLYWAY_BASELINE_ON_MIGRATE:-false}
+      TASKFLOW_BIND_ALL: "true"
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
