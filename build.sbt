@@ -12,6 +12,9 @@ lazy val root = (project in file("."))
       "org.http4s" %% "http4s-dsl" % "0.23.38",
       "org.http4s" %% "http4s-circe" % "0.23.38",
       "io.circe" %% "circe-generic" % "0.14.17",
+      "org.tpolecat" %% "doobie-core" % "1.0.0-RC12",
+      "org.tpolecat" %% "doobie-postgres" % "1.0.0-RC12",
+      "org.tpolecat" %% "doobie-hikari" % "1.0.0-RC12",
       "org.scalameta" %% "munit" % "1.2.1" % Test
     )
   )
