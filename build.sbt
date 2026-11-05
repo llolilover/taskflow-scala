@@ -10,6 +10,8 @@ lazy val root = (project in file("."))
       "org.typelevel" %% "cats-effect" % "3.7.1",
       "org.http4s" %% "http4s-ember-server" % "0.23.38",
       "org.http4s" %% "http4s-dsl" % "0.23.38",
+      "org.http4s" %% "http4s-circe" % "0.23.38",
+      "io.circe" %% "circe-generic" % "0.14.17",
       "org.scalameta" %% "munit" % "1.2.1" % Test
     )
   )
