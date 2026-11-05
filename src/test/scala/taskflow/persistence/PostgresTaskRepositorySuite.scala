@@ -5,6 +5,8 @@ import cats.effect.unsafe.implicits.global
 import cats.syntax.parallel.*
 import java.util.UUID
 import munit.FunSuite
+import doobie.*
+import doobie.implicits.*
 
 import taskflow.domain.*
 
@@ -103,3 +105,10 @@ class PostgresTaskRepositorySuite extends FunSuite:
       }
       assertEquals(result.items.size, 1)
       assert(result.nextCursor.nonEmpty)
+
+    test("Flyway applied V1 and V2 migrations"):
+      val applied = Database.transactor(Database.Config.fromEnv).use { xa =>
+        sql"SELECT count(*) FROM flyway_schema_history WHERE success = true"
+          .query[Long].unique.transact(xa)
+      }.unsafeRunSync()
+      assert(applied >= 2L)

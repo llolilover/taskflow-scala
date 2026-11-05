@@ -1,68 +1,92 @@
 # TaskFlow — Scala 3 backend
 
-Учебный REST API управления задачами. Демонстрирует типобезопасную предметную область, работу с PostgreSQL и защиту от конфликтов при конкурентных обновлениях.
+Учебный backend-сервис управления задачами с типобезопасными правилами, конкурентными обновлениями и постоянным хранением в PostgreSQL.
 
 ## Реализовано
 
-- Scala 3: opaque types, enum/ADT, Either, чистая бизнес-логика переходов
-- Cats Effect + http4s + Circe: HTTP API и JSON
-- Doobie + PostgreSQL 16: постоянное хранение задач
-- HikariCP: ограниченный пул соединений, жизненный цикл через Resource
-- Optimistic locking: SQL UPDATE с проверкой version
-- История переходов: UPDATE задачи и INSERT аудита в одной транзакции
-- Фильтрация по статусу и исполнителю, keyset-пагинация по UUID через SQL (лимит 1–100)
-- MUnit: unit-тесты и PostgreSQL-интеграционные тесты
-- Docker Compose и GitHub Actions
+- Scala 3: opaque types, enum, ADT/Either, чистая модель переходов статусов
+- http4s + Cats Effect + Circe: HTTP API и JSON
+- Doobie + HikariCP + PostgreSQL: постоянное хранение и пул соединений
+- Optimistic locking: `UPDATE ... WHERE version = expectedVersion`
+- Аудит: изменение задачи и запись истории в одной SQL-транзакции
+- Фильтры по статусу и исполнителю; keyset-пагинация по UUID с лимитом 1–100
+- Flyway: версия схемы БД, V1 (таблицы) и V2 (индексы)
+- MUnit: unit + PostgreSQL-интеграционные тесты
+- Docker Compose: приложение и база запускаются вместе
+- GitHub Actions: компиляция, тесты, сборка JAR, Docker и HTTP smoke-тесты
 
-## Быстрый запуск
+## Быстрый запуск через Docker
 
-Нужны JDK 21, sbt, Docker + Docker Compose.
+Требуются Docker и Docker Compose:
 
 ```bash
-docker compose up -d db
+docker compose up -d --build
 docker compose ps
-sbt test
-sbt run
-```
-
-По умолчанию приложение подключается к `jdbc:postgresql://127.0.0.1:55432/taskflow`, пользователь и пароль `taskflow`. Эти значения предназначены **только для локальной разработки**. При необходимости можно задать `DB_URL`, `DB_USER`, `DB_PASSWORD` в окружении.
-
-В новом терминале:
-
-```bash
 bash scripts/smoke.sh
 ```
 
-Для тестов с реальной БД:
+HTTP API доступен на `http://127.0.0.1:8080`. Постоянные данные хранятся в Docker-томе `taskflow_pgdata`.
+
+Остановить:
 
 ```bash
-TASKFLOW_INTEGRATION=1 sbt test
+docker compose down
 ```
 
-Проверить историю через `GET /tasks/{id}/history`, страницы через `GET /tasks?limit=20&status=Backlog`. Полный контракт — [docs/API.md](docs/API.md).
+**Не используй** `docker compose down -v`, если хочешь сохранить задачи: этот флаг удалит том базы.
 
-Остановить сервер — Ctrl+C, остановить базу — `docker compose down`. **Не используй** `docker compose down -v`, если хочешь сохранить данные: этот флаг удаляет том с базой.
+### Если раньше уже запускал TaskFlow с прежней схемой
+
+Раньше `db/init/001_schema.sql` создавал таблицы напрямую, без Flyway. Теперь Flyway по умолчанию **не присваивает версию существующей непустой БД**, чтобы случайно не принять незнакомую схему.
+
+**Для твоей существующей локальной БД из старой версии TaskFlow** разреши однократную базовую отметку версии:
+
+```bash
+FLYWAY_BASELINE_ON_MIGRATE=true docker compose up -d --build
+```
+
+Flyway отметит исходную схему как V1 и применит V2 (индексы с `IF NOT EXISTS`); таблицы и данные сохранятся. После успешного первого запуска возвращайся к обычной команде без этого флага. **Не используй baseline для чужих или неизвестных баз**.
+
+Если ты уже собрал сервис вручную локально и хочешь выполнить одноразовый baseline без Docker-приложения:
+
+```bash
+docker compose up -d db
+FLYWAY_BASELINE_ON_MIGRATE=true sbt run
+```
+
+## Локальный запуск без Docker-контейнера приложения
+
+Требуются JDK 21, sbt и запущенный контейнер PostgreSQL:
+
+```bash
+docker compose up -d db
+TASKFLOW_INTEGRATION=1 sbt clean test
+sbt run
+```
+
+Для новой базы Flyway создаст таблицы сам. Для **старой непустой базы** требуется описанный выше однократный baseline.
+
+## Сборка отдельного JAR
+
+```bash
+sbt assembly
+java -jar target/scala-3.3.9/taskflow.jar
+```
+
+Соединение задаётся переменными `DB_URL`, `DB_USER`, `DB_PASSWORD`. Значения по умолчанию — только для локальной разработки, не для production.
 
 ## Архитектура
 
 `TaskRoutes` → `TaskOperations` → `PostgresTaskRepository` → PostgreSQL
 
-`TaskService` — старая реализация на `Ref`, сохранена для быстрых модульных тестов. В работающем HTTP-приложении используется только PostgreSQL.
+Доменная модель применяет правила переходов без взаимодействия с БД. Конкурентная защита работает атомарным SQL `UPDATE` с проверкой версии. В той же транзакции создаётся запись истории. `TaskService` на `Ref` используется только в быстрых unit-тестах.
 
-При обновлении статуса транзакция:
-1. читает задачу и проверяет ожидаемую версию;
-2. применяет чистое доменное правило перехода;
-3. выполняет условный `UPDATE ... WHERE version = expectedVersion`;
-4. только при успешном UPDATE записывает событие в `task_history`;
-5. коммитит оба изменения вместе.
+Миграции запускаются **до** открытия HTTP-порта; при ошибке соединения или миграции сервис не стартует.
 
-Это гарантирует отсутствие потерянных обновлений для одной задачи при конкурентных запросах. При ошибке транзакция откатывается.
+## API
 
-## Фильтрация и пагинация
-
-`GET /tasks` возвращает `items` и `nextCursor`; по умолчанию 20 задач. Опциональные фильтры `status`, `assignee`, `limit`, `cursor`. SQL ограничивает выборку и использует порядок UUID (это **не** порядок создания). Подробности в `docs/API.md`.
+См. [docs/API.md](docs/API.md). Основные маршруты: `POST /tasks`, `GET /tasks?limit=20&status=Backlog`, `GET /tasks/{id}`, `PATCH /tasks/{id}/status`, `GET /tasks/{id}/history`.
 
 ## Ограничения
 
-Это учебный сервис, а не production-система. Пока нет аутентификации, полноценного мигратора БД и деплоя. Скрипт `db/init/001_schema.sql` запускается PostgreSQL Docker **только при первом создании пустого тома**. Не изменяй его в существующей базе без миграции.
-
+Проект предназначен для демонстрации backend-разработки. Пока нет аутентификации, метрик, деплоя в облако и production-конфигурации секретов. Доступ к HTTP и PostgreSQL в Compose ограничен loopback-интерфейсом компьютера.

@@ -29,10 +29,22 @@ jobs:
           done
           docker compose logs db
           exit 1
-      - name: Compile and run unit/integration tests
+      - name: Unit, integration tests and runnable JAR
         env:
           TASKFLOW_INTEGRATION: '1'
-        run: sbt -batch clean test
-      - name: Stop PostgreSQL
+        run: sbt -batch clean test assembly
+      - name: Build and start complete stack
+        run: docker compose up -d --build app
+      - name: HTTP smoke test against the app container
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:8080/health; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8080/health || (docker compose logs app && exit 1)
+          bash scripts/smoke.sh
+      - name: Stop containers
         if: always()
         run: docker compose down -v

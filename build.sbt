@@ -5,6 +5,13 @@ ThisBuild / version := "0.1.0"
 lazy val root = (project in file("."))
   .settings(
     name := "taskflow-scala",
+    assembly / mainClass := Some("taskflow.Main"),
+    assembly / assemblyJarName := "taskflow.jar",
+    assembly / test := {},
+    assembly / assemblyMergeStrategy := {
+      case PathList("META-INF", "services", _ @ _*) => MergeStrategy.filterDistinctLines
+      case path => (assembly / assemblyMergeStrategy).value(path)
+    },
     scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked"),
     libraryDependencies ++= Seq(
       "org.typelevel" %% "cats-effect" % "3.7.1",

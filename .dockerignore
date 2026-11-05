@@ -1,0 +1,10 @@
+.git
+.github
+.idea
+.metals
+.bsp
+target
+project/target
+project/project
+.env
+*.log
