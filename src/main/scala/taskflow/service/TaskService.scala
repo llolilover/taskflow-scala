@@ -9,9 +9,9 @@ import taskflow.domain.TaskId.*
 /** Fast in-memory implementation used by unit tests. The running server uses PostgreSQL. */
 final class TaskService(state: Ref[IO, Map[TaskId, Task]]) extends TaskOperations:
 
-  def create(title: String): IO[Either[DomainError, Task]] =
+  def create(title: String, assigneeId: Option[UserId]): IO[Either[DomainError, Task]] =
     IO(UUID.randomUUID()).flatMap { uuid =>
-      Task.create(TaskId.fromUUID(uuid), title, None) match
+      Task.create(TaskId.fromUUID(uuid), title, assigneeId) match
         case Left(error) =>
           IO.pure[Either[DomainError, Task]](Left(error))
         case Right(task) =>
@@ -24,6 +24,18 @@ final class TaskService(state: Ref[IO, Map[TaskId, Task]]) extends TaskOperation
 
   def list: IO[List[Task]] =
     state.get.map(_.values.toList.sortBy(_.id.value.toString))
+
+  def page(query: TaskQuery): IO[TaskPage] =
+    state.get.map { state =>
+      val rows = state.valuesIterator
+        .filter(task => query.status.forall(_ == task.status))
+        .filter(task => query.assigneeId.forall(id => task.assigneeId.contains(id)))
+        .filter(task => query.cursor.forall(c => task.id.value.toString > c.value.toString))
+        .toList
+        .sortBy(_.id.value.toString)
+        .take(query.limit + 1)
+      TaskPage.fromFetched(rows, query.limit)
+    }
 
   /** One atomic check-and-update: concurrent callers using the same version cannot both succeed. */
   def changeStatus(

@@ -22,4 +22,19 @@ stale_status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$base/tasks/$id/
 
 history=$(curl -fsS "$base/tasks/$id/history")
 printf '%s' "$history" | python3 -c 'import json,sys; rows=json.load(sys.stdin); assert len(rows)==1 and rows[0]["fromStatus"]=="Backlog" and rows[0]["toStatus"]=="InProgress"'
-echo "Smoke checks passed: health, create, get, list, update, version conflict, history."
+# An isolated assignee ID makes this test independent of existing tasks in PostgreSQL.
+assignee=$(python3 -c 'import uuid; print(uuid.uuid4())')
+for title in "Page A" "Page B"; do
+  curl -fsS -X POST "$base/tasks" -H 'Content-Type: application/json' \
+    -d "{\"title\":\"$title\",\"assigneeId\":\"$assignee\"}" > /dev/null
+done
+
+first=$(curl -fsS "$base/tasks?assignee=$assignee&limit=1")
+cursor=$(printf '%s' "$first" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert len(data["items"])==1; assert data["nextCursor"]; print(data["nextCursor"])')
+second=$(curl -fsS "$base/tasks?assignee=$assignee&limit=1&cursor=$cursor")
+printf '%s' "$second" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert len(data["items"])==1; assert data["nextCursor"] is None'
+
+invalid=$(curl -s -o /dev/null -w '%{http_code}' "$base/tasks?limit=101")
+[[ "$invalid" == "400" ]] || { echo "expected 400 for invalid limit, got $invalid" >&2; exit 1; }
+
+echo "Smoke checks passed: health, CRUD, version conflict, history, filtered keyset pagination."

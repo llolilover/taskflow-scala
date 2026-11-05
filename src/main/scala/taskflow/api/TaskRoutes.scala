@@ -17,7 +17,7 @@ import taskflow.service.TaskOperations
 
 object TaskRoutes:
 
-  private final case class CreateTaskRequest(title: String)
+  private final case class CreateTaskRequest(title: String, assigneeId: Option[String])
   private object CreateTaskRequest:
     given Decoder[CreateTaskRequest] = deriveDecoder[CreateTaskRequest]
 
@@ -25,11 +25,17 @@ object TaskRoutes:
   private object ChangeStatusRequest:
     given Decoder[ChangeStatusRequest] = deriveDecoder[ChangeStatusRequest]
 
-  private final case class TaskResponse(id: String, title: String, status: String, version: Long)
+  private final case class TaskResponse(id: String, title: String, status: String, version: Long, assigneeId: Option[String])
   private object TaskResponse:
     given Encoder[TaskResponse] = deriveEncoder[TaskResponse]
     def from(task: Task): TaskResponse =
-      TaskResponse(task.id.value.toString, task.title, task.status.toString, task.version)
+      TaskResponse(task.id.value.toString, task.title, task.status.toString, task.version, task.assigneeId.map(_.value.toString))
+
+  private final case class TaskPageResponse(items: List[TaskResponse], nextCursor: Option[String])
+  private object TaskPageResponse:
+    given Encoder[TaskPageResponse] = deriveEncoder[TaskPageResponse]
+    def from(page: TaskPage): TaskPageResponse =
+      TaskPageResponse(page.items.map(TaskResponse.from), page.nextCursor)
 
   private final case class HistoryResponse(id: String, fromStatus: String, toStatus: String, occurredAt: String)
   private object HistoryResponse:
@@ -44,9 +50,38 @@ object TaskRoutes:
   private given EntityDecoder[IO, CreateTaskRequest] = jsonOf[IO, CreateTaskRequest]
   private given EntityDecoder[IO, ChangeStatusRequest] = jsonOf[IO, ChangeStatusRequest]
   private given EntityEncoder[IO, TaskResponse] = jsonEncoderOf[IO, TaskResponse]
+  private given EntityEncoder[IO, TaskPageResponse] = jsonEncoderOf[IO, TaskPageResponse]
   private given taskListEncoder: EntityEncoder[IO, List[TaskResponse]] = jsonEncoderOf[IO, List[TaskResponse]]
   private given historyListEncoder: EntityEncoder[IO, List[HistoryResponse]] = jsonEncoderOf[IO, List[HistoryResponse]]
   private given EntityEncoder[IO, ErrorResponse] = jsonEncoderOf[IO, ErrorResponse]
+
+  private def parseUuid(raw: String): Option[UUID] =
+    Try(UUID.fromString(raw)).toOption
+
+  private def optionalUuid(
+      raw: Option[String],
+      label: String
+  ): Either[String, Option[UUID]] =
+    raw match
+      case None => Right(None)
+      case Some(value) =>
+        parseUuid(value).toRight(s"Invalid $label UUID").map(Some(_))
+
+  private def parseListQuery(params: Map[String, String]): Either[String, TaskQuery] =
+    for
+      limit <- params.get("limit") match
+        case None => Right(TaskQuery.DefaultLimit)
+        case Some(raw) =>
+          Try(raw.toInt).toOption
+            .filter(value => value >= 1 && value <= TaskQuery.MaxLimit)
+            .toRight(s"limit must be between 1 and ${TaskQuery.MaxLimit}")
+      status <- params.get("status") match
+        case None => Right(None)
+        case Some(raw) =>
+          TaskStatus.parse(raw).toRight("Invalid status filter").map(Some(_))
+      assignee <- optionalUuid(params.get("assignee"), "assignee")
+      cursor <- optionalUuid(params.get("cursor"), "cursor")
+    yield TaskQuery(status, assignee.map(UserId.fromUUID), limit, cursor.map(TaskId.fromUUID))
 
   private def errorResponse(error: DomainError): IO[Response[IO]] =
     error match
@@ -61,14 +96,20 @@ object TaskRoutes:
         req.attemptAs[CreateTaskRequest].value.flatMap {
           case Left(_) => BadRequest(ErrorResponse("Invalid JSON body"))
           case Right(body) =>
-            service.create(body.title).flatMap {
-              case Left(error) => errorResponse(error)
-              case Right(task) => Created(TaskResponse.from(task))
-            }
+            optionalUuid(body.assigneeId, "assigneeId") match
+              case Left(message) => BadRequest(ErrorResponse(message))
+              case Right(assignee) =>
+                service.create(body.title, assignee.map(UserId.fromUUID)).flatMap {
+                  case Left(error) => errorResponse(error)
+                  case Right(task) => Created(TaskResponse.from(task))
+                }
         }
 
-      case GET -> Root / "tasks" =>
-        service.list.flatMap(tasks => Ok(tasks.map(TaskResponse.from)))
+      case req @ GET -> Root / "tasks" =>
+        parseListQuery(req.uri.query.params) match
+          case Left(message) => BadRequest(ErrorResponse(message))
+          case Right(query) =>
+            service.page(query).flatMap(page => Ok(TaskPageResponse.from(page)))
 
       case GET -> Root / "tasks" / rawId / "history" =>
         Try(UUID.fromString(rawId)).toOption match

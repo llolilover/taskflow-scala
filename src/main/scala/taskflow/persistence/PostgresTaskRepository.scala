@@ -35,9 +35,9 @@ final class PostgresTaskRepository(xa: Transactor[IO]) extends TaskOperations:
            FROM tasks WHERE id = ${id.value}"""
       .query[TaskRow].option.map(_.map(decode))
 
-  def create(title: String): IO[Either[DomainError, Task]] =
+  def create(title: String, assigneeId: Option[UserId]): IO[Either[DomainError, Task]] =
     IO(UUID.randomUUID()).flatMap { uuid =>
-      Task.create(TaskId.fromUUID(uuid), title, None) match
+      Task.create(TaskId.fromUUID(uuid), title, assigneeId) match
         case Left(error) =>
           IO.pure[Either[DomainError, Task]](Left(error))
         case Right(task) =>
@@ -55,6 +55,29 @@ final class PostgresTaskRepository(xa: Transactor[IO]) extends TaskOperations:
     sql"""SELECT id, title, assignee_id, status, version FROM tasks
            ORDER BY created_at, id"""
       .query[TaskRow].to[List].map(_.map(decode)).transact(xa)
+
+  /** Indexed keyset traversal: no OFFSET, no unbounded result set. */
+  def page(query: TaskQuery): IO[TaskPage] =
+    val statusClause: Fragment = query.status match
+      case None => fr""
+      case Some(status) => fr"AND status = ${status.toString}"
+
+    val assigneeClause: Fragment = query.assigneeId match
+      case None => fr""
+      case Some(user) => fr"AND assignee_id = ${user.value}"
+
+    val cursorClause: Fragment = query.cursor match
+      case None => fr""
+      case Some(after) => fr"AND id > ${after.value}"
+
+    val statement =
+      fr"SELECT id, title, assignee_id, status, version FROM tasks WHERE TRUE" ++
+        statusClause ++ assigneeClause ++ cursorClause ++
+        fr"ORDER BY id ASC LIMIT ${query.limit + 1}"
+
+    statement.query[TaskRow].to[List]
+      .map(rows => TaskPage.fromFetched(rows.map(decode), query.limit))
+      .transact(xa)
 
   def history(id: TaskId): IO[List[TaskHistory]] =
     sql"""SELECT id, task_id, from_status, to_status, occurred_at::text

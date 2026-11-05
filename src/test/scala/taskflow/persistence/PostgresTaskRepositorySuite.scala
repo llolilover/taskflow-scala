@@ -3,6 +3,7 @@ package taskflow.persistence
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import cats.syntax.parallel.*
+import java.util.UUID
 import munit.FunSuite
 
 import taskflow.domain.*
@@ -60,3 +61,41 @@ class PostgresTaskRepositorySuite extends FunSuite:
       assertEquals(List(first, second).count(_ == Left(DomainError.VersionConflict)), 1)
       assertEquals(stored.map(_.version), Some(1L))
       assertEquals(rows.size, 1)
+
+    test("keyset pagination filters by status and assignee"):
+      val user = UserId.fromUUID(UUID.randomUUID())
+      val result = withRepo { repo =>
+        for
+          a <- repo.create("Pagination A", Some(user))
+          b <- repo.create("Pagination B", Some(user))
+          c <- repo.create("Pagination C", Some(user))
+          firstPage <- repo.page(TaskQuery(None, Some(user), 2, None))
+          nextPage <- repo.page(TaskQuery(
+            None, Some(user), 2,
+            firstPage.nextCursor.map(value => TaskId.fromUUID(UUID.fromString(value)))
+          ))
+          updated <- repo.changeStatus(a.toOption.get.id, TaskStatus.InProgress, 0L)
+          filtered <- repo.page(TaskQuery(Some(TaskStatus.InProgress), Some(user), 10, None))
+        yield (List(a, b, c), firstPage, nextPage, updated, filtered)
+      }
+      assert(result._1.forall(_.isRight))
+      assertEquals(result._2.items.size, 2)
+      assert(result._2.nextCursor.nonEmpty)
+      assertEquals(result._3.items.size, 1)
+      assertEquals(result._3.nextCursor, None)
+      val seen = (result._2.items ++ result._3.items).map(_.id).toSet
+      assertEquals(seen, result._1.map(_.toOption.get.id).toSet)
+      assert(result._4.isRight)
+      assertEquals(result._5.items.map(_.id), List(result._1.head.toOption.get.id))
+
+    test("page size does not exceed requested limit"):
+      val user = UserId.fromUUID(UUID.randomUUID())
+      val result = withRepo { repo =>
+        for
+          _ <- repo.create("Bound A", Some(user))
+          _ <- repo.create("Bound B", Some(user))
+          page <- repo.page(TaskQuery(None, Some(user), 1, None))
+        yield page
+      }
+      assertEquals(result.items.size, 1)
+      assert(result.nextCursor.nonEmpty)
