@@ -20,6 +20,10 @@ stale_status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$base/tasks/$id/
   -H 'Content-Type: application/json' -d '{"status":"Cancelled","expectedVersion":0}')
 [[ "$stale_status" == "409" ]] || { echo "expected 409, got $stale_status" >&2; exit 1; }
 
+negative_status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$base/tasks/$id/status" \
+  -H 'Content-Type: application/json' -d '{"status":"Done","expectedVersion":-1}')
+[[ "$negative_status" == "400" ]] || { echo "expected 400 for negative version, got $negative_status" >&2; exit 1; }
+
 history=$(curl -fsS "$base/tasks/$id/history")
 printf '%s' "$history" | python3 -c 'import json,sys; rows=json.load(sys.stdin); assert len(rows)==1 and rows[0]["fromStatus"]=="Backlog" and rows[0]["toStatus"]=="InProgress"'
 # An isolated assignee ID makes this test independent of existing tasks in PostgreSQL.

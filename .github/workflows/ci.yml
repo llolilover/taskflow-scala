@@ -45,6 +45,32 @@ jobs:
           done
           curl -fsS http://127.0.0.1:8080/health || (docker compose logs app && exit 1)
           bash scripts/smoke.sh
+      - name: Verify data and audit history survive API restart
+        run: |
+          created=$(curl -fsS -X POST http://127.0.0.1:8080/tasks \
+            -H 'Content-Type: application/json' \
+            -d '{"title":"Restart durability test"}')
+          task_id=$(printf '%s' "$created" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+          curl -fsS -X PATCH "http://127.0.0.1:8080/tasks/$task_id/status" \
+            -H 'Content-Type: application/json' \
+            -d '{"status":"InProgress","expectedVersion":0}' > /dev/null
+          docker compose restart app
+          ready=0
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:8080/health > /dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker compose logs app
+            exit 1
+          fi
+          curl -fsS "http://127.0.0.1:8080/tasks/$task_id" |
+            python3 -c 'import json,sys; task=json.load(sys.stdin); assert task["status"]=="InProgress" and task["version"]==1'
+          curl -fsS "http://127.0.0.1:8080/tasks/$task_id/history" |
+            python3 -c 'import json,sys; events=json.load(sys.stdin); assert len(events)==1 and events[0]["toStatus"]=="InProgress"'
       - name: Stop containers
         if: always()
         run: docker compose down -v

@@ -24,15 +24,11 @@ class PostgresTaskRepositorySuite extends FunSuite:
 
   if sys.env.get("TASKFLOW_INTEGRATION").contains("1") then
 
-    test("tasks survive creating a new repository object"):
-      val (created, loaded) = withRepo { repo =>
-        for
-          saved <- repo.create("Persisted in PostgreSQL")
-          found <- repo.find(saved.toOption.get.id)
-        yield (saved, found)
-      }
-      assert(created.isRight)
+    test("tasks survive closing the connection pool and opening another"):
+      val created = withRepo(_.create("Persisted in PostgreSQL")).toOption.get
+      val loaded = withRepo(_.find(created.id))
       assertEquals(loaded.map(_.title), Some("Persisted in PostgreSQL"))
+      assertEquals(loaded.map(_.version), Some(0L))
 
     test("status update records one history entry; stale version does not"):
       val (first, stale, rows) = withRepo { repo =>
@@ -112,3 +108,33 @@ class PostgresTaskRepositorySuite extends FunSuite:
           .query[Long].unique.transact(xa)
       }.unsafeRunSync()
       assert(applied >= 2L)
+
+    test("forbidden transition does not mutate task or create audit entry"):
+      val (rejected, saved, events) = withRepo { repo =>
+        for
+          created <- repo.create("Forbidden transition")
+          id = created.toOption.get.id
+          rejected <- repo.changeStatus(id, TaskStatus.Done, 0L)
+          saved <- repo.find(id)
+          events <- repo.history(id)
+        yield (rejected, saved, events)
+      }
+      assertEquals(rejected, Left(DomainError.InvalidTransition(TaskStatus.Backlog, TaskStatus.Done)))
+      assertEquals(saved.map(_.status), Some(TaskStatus.Backlog))
+      assertEquals(saved.map(_.version), Some(0L))
+      assertEquals(events.size, 0)
+
+    test("Flyway migrations can run twice without modifying history"):
+      val config = Database.Config.fromEnv
+      def applied: IO[Long] =
+        Database.transactor(config).use { xa =>
+          sql"SELECT count(*) FROM flyway_schema_history WHERE success = true"
+            .query[Long].unique.transact(xa)
+        }
+      val (before, after) = (for
+        before <- applied
+        _ <- Database.migrate(config)
+        after <- applied
+      yield (before, after)).unsafeRunSync()
+      assert(before >= 2L)
+      assertEquals(after, before)
