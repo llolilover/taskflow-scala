@@ -1,8 +1,10 @@
 package taskflow
 
-import cats.effect.{IO, IOApp, Ref}
+import cats.effect.{IO, IOApp}
 import cats.syntax.semigroupk.*
 import com.comcast.ip4s.*
+import doobie.implicits.*
+import doobie.*
 
 import org.http4s.HttpRoutes
 import org.http4s.dsl.io.*
@@ -10,8 +12,7 @@ import org.http4s.implicits.*
 import org.http4s.ember.server.EmberServerBuilder
 
 import taskflow.api.TaskRoutes
-import taskflow.domain.{Task, TaskId}
-import taskflow.service.TaskService
+import taskflow.persistence.{Database, PostgresTaskRepository}
 
 object Main extends IOApp.Simple:
 
@@ -21,15 +22,18 @@ object Main extends IOApp.Simple:
   }
 
   def run: IO[Unit] =
-    Ref.of[IO, Map[TaskId, Task]](Map.empty[TaskId, Task]).flatMap { state =>
-      val service = new TaskService(state)
+    Database.transactor(Database.Config.fromEnv).use { xa =>
+      val service = new PostgresTaskRepository(xa)
       val app = (healthRoutes <+> TaskRoutes.routes(service)).orNotFound
 
-      EmberServerBuilder
-        .default[IO]
-        .withHost(ipv4"127.0.0.1")
-        .withPort(port"8080")
-        .withHttpApp(app)
-        .build
-        .use(_ => IO.never)
+      // Fail immediately if the DB is not reachable, rather than silently serving errors.
+      sql"SELECT 1".query[Int].unique.transact(xa).flatMap { _ =>
+        EmberServerBuilder
+          .default[IO]
+          .withHost(ipv4"127.0.0.1")
+          .withPort(port"8080")
+          .withHttpApp(app)
+          .build
+          .use(_ => IO.never)
+      }
     }

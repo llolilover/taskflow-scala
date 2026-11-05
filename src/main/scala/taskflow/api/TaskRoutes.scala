@@ -13,7 +13,7 @@ import org.http4s.dsl.io.*
 
 import taskflow.domain.*
 import taskflow.domain.TaskId.*
-import taskflow.service.TaskService
+import taskflow.service.TaskOperations
 
 object TaskRoutes:
 
@@ -31,6 +31,12 @@ object TaskRoutes:
     def from(task: Task): TaskResponse =
       TaskResponse(task.id.value.toString, task.title, task.status.toString, task.version)
 
+  private final case class HistoryResponse(id: String, fromStatus: String, toStatus: String, occurredAt: String)
+  private object HistoryResponse:
+    given Encoder[HistoryResponse] = deriveEncoder[HistoryResponse]
+    def from(event: TaskHistory): HistoryResponse =
+      HistoryResponse(event.id.toString, event.fromStatus.toString, event.toStatus.toString, event.occurredAt)
+
   private final case class ErrorResponse(error: String)
   private object ErrorResponse:
     given Encoder[ErrorResponse] = deriveEncoder[ErrorResponse]
@@ -39,6 +45,7 @@ object TaskRoutes:
   private given EntityDecoder[IO, ChangeStatusRequest] = jsonOf[IO, ChangeStatusRequest]
   private given EntityEncoder[IO, TaskResponse] = jsonEncoderOf[IO, TaskResponse]
   private given EntityEncoder[IO, List[TaskResponse]] = jsonEncoderOf[IO, List[TaskResponse]]
+  private given EntityEncoder[IO, List[HistoryResponse]] = jsonEncoderOf[IO, List[HistoryResponse]]
   private given EntityEncoder[IO, ErrorResponse] = jsonEncoderOf[IO, ErrorResponse]
 
   private def errorResponse(error: DomainError): IO[Response[IO]] =
@@ -48,7 +55,7 @@ object TaskRoutes:
       case _: DomainError.InvalidTransition => Conflict(ErrorResponse(error.message))
       case _: DomainError.Validation => BadRequest(ErrorResponse(error.message))
 
-  def routes(service: TaskService): HttpRoutes[IO] =
+  def routes(service: TaskOperations): HttpRoutes[IO] =
     HttpRoutes.of[IO] {
       case req @ POST -> Root / "tasks" =>
         req.attemptAs[CreateTaskRequest].value.flatMap {
@@ -62,6 +69,17 @@ object TaskRoutes:
 
       case GET -> Root / "tasks" =>
         service.list.flatMap(tasks => Ok(tasks.map(TaskResponse.from)))
+
+      case GET -> Root / "tasks" / rawId / "history" =>
+        Try(UUID.fromString(rawId)).toOption match
+          case None => BadRequest(ErrorResponse("Invalid task ID"))
+          case Some(uuid) =>
+            val id = TaskId.fromUUID(uuid)
+            service.find(id).flatMap {
+              case None => NotFound(ErrorResponse("Task not found"))
+              case Some(_) =>
+                service.history(id).flatMap(events => Ok(events.map(HistoryResponse.from)))
+            }
 
       case GET -> Root / "tasks" / rawId =>
         Try(UUID.fromString(rawId)).toOption match
