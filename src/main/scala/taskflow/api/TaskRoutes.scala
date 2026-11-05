@@ -44,8 +44,8 @@ object TaskRoutes:
   private given EntityDecoder[IO, CreateTaskRequest] = jsonOf[IO, CreateTaskRequest]
   private given EntityDecoder[IO, ChangeStatusRequest] = jsonOf[IO, ChangeStatusRequest]
   private given EntityEncoder[IO, TaskResponse] = jsonEncoderOf[IO, TaskResponse]
-  private given EntityEncoder[IO, List[TaskResponse]] = jsonEncoderOf[IO, List[TaskResponse]]
-  private given EntityEncoder[IO, List[HistoryResponse]] = jsonEncoderOf[IO, List[HistoryResponse]]
+  private given taskListEncoder: EntityEncoder[IO, List[TaskResponse]] = jsonEncoderOf[IO, List[TaskResponse]]
+  private given historyListEncoder: EntityEncoder[IO, List[HistoryResponse]] = jsonEncoderOf[IO, List[HistoryResponse]]
   private given EntityEncoder[IO, ErrorResponse] = jsonEncoderOf[IO, ErrorResponse]
 
   private def errorResponse(error: DomainError): IO[Response[IO]] =
