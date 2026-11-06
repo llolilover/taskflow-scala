@@ -46,16 +46,29 @@ object Task:
   val MaxTitleLength = 120
 
   def create(id: TaskId, rawTitle: String, assigneeId: Option[UserId]): Either[DomainError, Task] =
-    val title = rawTitle.trim
+    validateTitle(rawTitle).map(title => Task(id, title, assigneeId, TaskStatus.Backlog, 0L))
+
+
+  private def validateTitle(raw: String): Either[DomainError, String] =
+    val title = raw.trim
     if title.isEmpty then Left(DomainError.Validation("Title must not be empty"))
     else if title.length > MaxTitleLength then
       Left(DomainError.Validation(s"Title must be <= $MaxTitleLength characters"))
-    else Right(Task(id, title, assigneeId, TaskStatus.Backlog, 0L))
+    else Right(title)
 
   def transition(task: Task, next: TaskStatus): Either[DomainError, Task] =
     if TaskRules.canTransition(task.status, next) then
       Right(task.copy(status = next, version = task.version + 1L))
     else Left(DomainError.InvalidTransition(task.status, next))
+
+  
+  def rename(task: Task, rawTitle: String): Either[DomainError, Task] = 
+    validateTitle(rawTitle).map { newTitle => 
+      if newTitle == task.title then task
+      else task.copy(title = newTitle, version = task.version + 1)
+    }
+
+
 
 object TaskRules:
   def canTransition(from: TaskStatus, to: TaskStatus): Boolean =

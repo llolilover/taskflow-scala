@@ -8,9 +8,11 @@ class TaskSuite extends FunSuite:
     Task.create(TaskId.fromUUID(UUID.randomUUID()), "  Implement API  ", None).toOption.get
 
   test("creation trims title and initializes version"):
-    assertEquals(task.title, "Implement API")
-    assertEquals(task.status, TaskStatus.Backlog)
-    assertEquals(task.version, 0L)
+    val created = task
+
+    assertEquals(created.title, "Implement API")
+    assertEquals(created.status, TaskStatus.Backlog)
+    assertEquals(created.version, 0L)
 
   test("title must not be blank"):
     assert(Task.create(TaskId.fromUUID(UUID.randomUUID()), "  ", None).isLeft)
@@ -44,3 +46,42 @@ class TaskSuite extends FunSuite:
   test("parse status is case insensitive"):
     assertEquals(TaskStatus.parse("inprogress"), Some(TaskStatus.InProgress))
     assertEquals(TaskStatus.parse("unknown"), None)
+
+  test("rename updates title and increments version"):
+    val original = task
+    val result = Task.rename(original, "New title")
+
+    assertEquals(
+      result,
+      Right(original.copy(title = "New title", version = 1L))
+    )
+    assertEquals(original.title, "Implement API")
+    assertEquals(original.version, 0L)
+
+  test("rename with same title preserves task"):
+    val original = task
+    val result = Task.rename(original, "  Implement API  ")
+
+    assertEquals(result, Right(original))
+
+  test("rename rejects blank title"):
+    val result = Task.rename(task, "   ")
+
+    assertEquals(
+      result,
+      Left(DomainError.Validation("Title must not be empty"))
+    )
+
+  test("rename rejects title longer than 120 characters"):
+    val result = Task.rename(task, "x" * 121)
+
+    assertEquals(
+      result,
+      Left(DomainError.Validation("Title must be <= 120 characters"))
+    )
+
+  test("rename trims surrounding whitespace"):
+    val result = Task.rename(task, "  Clean title  ")
+
+    assertEquals(result.toOption.map(_.title), Some("Clean title"))
+    assertEquals(result.toOption.map(_.version), Some(1L))
